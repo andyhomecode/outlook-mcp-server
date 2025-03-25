@@ -3,3 +3,131 @@ Andy Maxwell things to fix:
 TODO: Logging to INFO and ERROR, not STDIO as that messes up the MCP client.
 
 TODO: Add shared mailbox functionallity
+CLAUDE suggested changes:
+
+After reviewing your Python code, here are the changes you'd need to make to access a shared inbox in Outlook via MAPI:
+
+The main issue is that your code currently only looks for folders within the default namespace folders and inbox subfolders. To access shared inboxes, you need to modify the `connect_to_outlook` and `get_folder_by_name` functions.
+
+Here are the specific changes needed:
+
+1. First, modify the `connect_to_outlook` function to optionally accept a shared mailbox name:
+
+```python
+def connect_to_outlook(shared_mailbox=None):
+    """Connect to Outlook application using COM with optional shared mailbox"""
+    try:
+        outlook = win32com.client.Dispatch("Outlook.Application")
+        namespace = outlook.GetNamespace("MAPI")
+        
+        # If a shared mailbox is specified, attempt to access it
+        if shared_mailbox:
+            recipient = namespace.CreateRecipient(shared_mailbox)
+            recipient.Resolve()
+            
+            if recipient.Resolved:
+                shared_inbox = namespace.GetSharedDefaultFolder(recipient, 6)  # 6 is the index for inbox folder
+                return outlook, namespace, shared_inbox
+            else:
+                raise Exception(f"Could not resolve shared mailbox: {shared_mailbox}")
+                
+        return outlook, namespace
+    except Exception as e:
+        raise Exception(f"Failed to connect to Outlook: {str(e)}")
+```
+
+2. Update the `get_folder_by_name` function to support shared mailboxes:
+
+```python
+def get_folder_by_name(namespace, folder_name: str, shared_inbox=None):
+    """Get a specific Outlook folder by name, optionally within a shared mailbox"""
+    try:
+        if shared_inbox:
+            # If we have a shared inbox, look for the folder within it
+            for folder in shared_inbox.Folders:
+                if folder.Name.lower() == folder_name.lower():
+                    return folder
+            
+            # If not found in direct subfolders, return None
+            return None
+            
+        # Original code for searching personal mailbox...
+        # First check inbox subfolder
+        inbox = namespace.GetDefaultFolder(6)  # 6 is the index for inbox folder
+        
+        # Rest of the original function remains the same
+```
+
+3. Create a new helper function to enumerate shared mailboxes:
+
+```python
+def list_shared_mailboxes(namespace):
+    """List all shared mailboxes available to the user"""
+    shared_mailboxes = []
+    
+    # Get all stores (including shared mailboxes)
+    stores = namespace.Stores
+    
+    for store in stores:
+        # Check if this is not the default store (i.e., it's a shared mailbox)
+        if not store.IsDefaultStore:
+            shared_mailboxes.append({
+                "name": store.DisplayName,
+                "store": store
+            })
+    
+    return shared_mailboxes
+```
+
+4. Create a new MCP tool to list shared mailboxes:
+
+```python
+@mcp.tool()
+def list_shared_mailboxes() -> str:
+    """
+    List all shared mailboxes available in Outlook
+    
+    Returns:
+        A list of available shared mailboxes
+    """
+    try:
+        # Connect to Outlook
+        _, namespace = connect_to_outlook()
+        
+        # Get shared mailboxes
+        shared_mailboxes = list_shared_mailboxes(namespace)
+        
+        if not shared_mailboxes:
+            return "No shared mailboxes found."
+        
+        result = "Available shared mailboxes:\n\n"
+        for i, mailbox in enumerate(shared_mailboxes, 1):
+            result += f"{i}. {mailbox['name']}\n"
+        
+        return result
+    except Exception as e:
+        return f"Error listing shared mailboxes: {str(e)}"
+```
+
+5. Modify your existing tools to support shared mailboxes by adding a `shared_mailbox` parameter:
+
+```python
+@mcp.tool()
+def list_recent_emails(days: int = 7, folder_name: Optional[str] = None, shared_mailbox: Optional[str] = None) -> str:
+    """
+    List email titles from the specified number of days
+    
+    Args:
+        days: Number of days to look back for emails (max 30)
+        folder_name: Name of the folder to check (if not specified, checks the Inbox)
+        shared_mailbox: Email address of the shared mailbox to access (if not specified, uses personal mailbox)
+        
+    Returns:
+        Numbered list of email titles with sender information
+    """
+    # Rest of your function here, modified to use the shared_mailbox parameter
+```
+
+Apply similar changes to your other email-related tools.
+
+These modifications should allow your code to access shared inboxes in Outlook via MAPI. The key is using the `GetSharedDefaultFolder` method with a resolved recipient to access mailboxes that have been shared with you.
