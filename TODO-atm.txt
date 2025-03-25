@@ -1,0 +1,5 @@
+Andy Maxwell things to fix:
+
+TODO: Logging to INFO and ERROR, not STDIO as that messes up the MCP client.
+
+TODO: Add shared mailbox functionallity
